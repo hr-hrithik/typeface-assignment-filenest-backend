@@ -1,0 +1,6 @@
+__pycache__
+__pycache__/
+alembic
+*.ini
+*.json
+local.env
