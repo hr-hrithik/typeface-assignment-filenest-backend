@@ -243,6 +243,8 @@ async def delete_folder_content_controller(content_id: str, user_authentication:
     response = APIResponse()
     try:
         delete_response = user_files_crud.delete_folder_content_row(content_id=content_id, user_id=user_authentication.user_id, db_session=db_session)
+        user_files_crud.delete_user_files_row(file_id=content_id, user_id=user_authentication.user_id, db_session=db_session)
+        
         if delete_response:
             db_session.commit()
             
@@ -365,5 +367,26 @@ async def update_file_controller(file_id: str, file_modified_at: int, folder_id:
         response.status_code = 500
         
         logger.exception(f"ERROR IN UPDATING USER USER FILE :: {e}")
+    
+    return response
+
+async def delete_file_controller(file_id: str, user_authentication: UserAuthentication, db_session: Session):
+    response = APIResponse()
+    try:
+        user_files_crud.delete_folder_content_row(content_id=file_id, user_id=user_authentication.user_id, db_session=db_session)
+        user_files_crud.delete_user_files_row(file_id=file_id, user_id=user_authentication.user_id, db_session=db_session)
+        
+        db_session.commit()
+        
+        response.data = {
+            "message": "File deleted successfully"
+        }
+        
+    except Exception as e:
+        db_session.rollback()
+        response.status = API_STATUS_STRINGS.ERROR.value
+        response.status_code = 500
+        
+        logger.exception(f"ERROR IN DELETING FILE :: {e}")
     
     return response

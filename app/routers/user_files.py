@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, Form, Header, UploadFile
 from fastapi.responses import JSONResponse, StreamingResponse
 from sqlalchemy.orm.session import Session
 
-from app.controllers.user_files_controller import delete_folder_content_controller, file_upload_success_controller, get_file_data_controller, get_file_details_controller, get_folder_contents_controller, get_user_files_controller, update_file_controller, upload_user_files_controller, user_files_resumable_upload_controller
+from app.controllers.user_files_controller import delete_file_controller, delete_folder_content_controller, file_upload_success_controller, get_file_data_controller, get_file_details_controller, get_folder_contents_controller, get_user_files_controller, update_file_controller, upload_user_files_controller, user_files_resumable_upload_controller
 from app.database.db_connection import get_db
 from app.helpers.authentication_helpers import authenticate_user
 from app.schemas.user_files_schemas import FileUploadSuccessRequest, UserFilesResumableUploadRequest
@@ -73,3 +73,9 @@ async def update_file(file_id: str = Form(), file_modified_at: int = Form(), fol
     response = await update_file_controller(file_id=file_id, file_modified_at=file_modified_at, user_file=user_file, folder_id=folder_id, user_authentication=user_authentication, db_session=db_session)
     return JSONResponse(content=response.model_dump(mode="json"), status_code=response.status_code)
 
+@router.delete(path='/delete-file/{file_id}')
+async def delete_file(file_id: str, authenticate = Depends(authenticate_user)):
+    user_authentication, db_session = authenticate
+    
+    response = await delete_file_controller(file_id=file_id, user_authentication=user_authentication, db_session=db_session)
+    return JSONResponse(content=response.model_dump(mode="json"), status_code=response.status_code)
