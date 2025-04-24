@@ -9,11 +9,11 @@ from app.schemas.authentication_schemas import AuthenticationResponse, UserAuthe
 
 logger = logging.getLogger(__name__)
 
-def authenticate_user(authorisation: str = Header(default=None), db_session: Session = Depends(get_db)):
+def authenticate_user(authorization: str = Header(default=None), db_session: Session = Depends(get_db)):
     response = AuthenticationResponse()
     
     try:
-        user_id = authentication_crud.get_user_id_from_token(user_token=authorisation, db_session=db_session)
+        user_id = authentication_crud.get_user_id_from_token(user_token=authorization, db_session=db_session)
         if user_id:
             user_authentication = UserAuthentication(
                 user_id=user_id

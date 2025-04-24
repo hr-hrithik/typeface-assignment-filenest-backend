@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, Form, Header, UploadFile
 from fastapi.responses import JSONResponse, StreamingResponse
 from sqlalchemy.orm.session import Session
 
-from app.controllers.user_files_controller import delete_folder_content_controller, file_upload_success_controller, get_file_data_controller, get_file_details_controller, get_folder_contents_controller, get_user_files_controller, upload_user_files_controller, user_files_resumable_upload_controller
+from app.controllers.user_files_controller import delete_folder_content_controller, file_upload_success_controller, get_file_data_controller, get_file_details_controller, get_folder_contents_controller, get_user_files_controller, update_file_controller, upload_user_files_controller, user_files_resumable_upload_controller
 from app.database.db_connection import get_db
 from app.helpers.authentication_helpers import authenticate_user
 from app.schemas.user_files_schemas import FileUploadSuccessRequest, UserFilesResumableUploadRequest
@@ -11,15 +11,17 @@ router = APIRouter()
 
 
 @router.get(path='/get-user-files')
-async def get_user_files(user_id: str, page: int = 1, db_session = Depends(get_db)):
-    response = await get_user_files_controller(user_id=user_id, page=page, db_session=db_session)
+async def get_user_files(page: int = 1, authenticate = Depends(authenticate_user)):
+    user_authentication, db_session = authenticate
     
+    response = await get_user_files_controller(user_id=user_authentication.user_id, page=page, db_session=db_session)
     return JSONResponse(content=response.model_dump(mode="json"), status_code=response.status_code)
 
-@router.post(path='/upload-user-files')
-async def upload_user_files(user_id: str = Form(), user_files: UploadFile = Form(), db_session: Session = Depends(get_db)):
-    response = await upload_user_files_controller(user_id=user_id, user_files=[user_files], db_session=db_session)
+@router.post(path='/upload-user-file')
+async def upload_user_files(file_modified_at: int = Form(), folder_id: str = Form(), user_file: UploadFile = Form(), authenticate = Depends(authenticate_user)):
+    user_authentication, db_session = authenticate
     
+    response = await upload_user_files_controller(file_modified_at=file_modified_at, user_id=user_authentication.user_id, folder_id=folder_id, user_file=user_file, db_session=db_session)
     return JSONResponse(content=response.model_dump(mode="json"), status_code=response.status_code)
 
 @router.post(path='/user-files-resumable-upload')
@@ -62,5 +64,12 @@ async def get_file_details(file_id: str, folder_id: str, authenticate = Depends(
     user_authentication, db_session = authenticate
     
     response = await get_file_details_controller(file_id=file_id, folder_id=folder_id, user_authentication=user_authentication, db_session=db_session)
+    return JSONResponse(content=response.model_dump(mode="json"), status_code=response.status_code)
+
+@router.put(path='/update-file')
+async def update_file(file_id: str = Form(), file_modified_at: int = Form(), folder_id: str = Form(), user_file: UploadFile = Form(), authenticate = Depends(authenticate_user)):
+    user_authentication, db_session = authenticate
+    
+    response = await update_file_controller(file_id=file_id, file_modified_at=file_modified_at, user_file=user_file, folder_id=folder_id, user_authentication=user_authentication, db_session=db_session)
     return JSONResponse(content=response.model_dump(mode="json"), status_code=response.status_code)
 

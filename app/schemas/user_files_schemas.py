@@ -23,11 +23,12 @@ class FileUploadSuccessRequest(BaseModel):
 
 ##RESPONSE SCHEMAS
 class UserFileMetadata(BaseModel):
-    file_id: str
     file_name: str
     file_type: str
+    file_size: float
     file_public_url: str
-    file_last_modified: datetime.datetime = None
+    file_thumbnail_url: str
+    file_last_modified: datetime.datetime
 
 class GetUserFilesResponse(BaseModel):
     files: List[UserFileMetadata] = []
@@ -60,6 +61,7 @@ class UserFolderContentsResponse(BaseModel):
     folder_content: List[UserFolderContentMetadata]
     
 class UserFileDetails(BaseModel):
+    file_id: str
     file_name: str
     file_type: str
     file_size: float

@@ -77,3 +77,7 @@ def get_folder_contents_data(folder_id: str, user_id: str, db_session: Session):
 def delete_folder_content_row(content_id: str, user_id: str, db_session: Session):
     delete_response = GenericCrud.delete_row(table_model=FolderContents, query_condition=[FolderContents.content_id ==content_id, FolderContents.user_id == user_id], db_session=db_session, auto_commit=False)
     return delete_response
+
+def update_folder_content_row(update_data: dict, content_id: str, user_folder_id: str, user_id: str, db_session: Session, auto_commit: bool):
+    GenericCrud.update_row(table_model=FolderContents, query_condition=[
+        FolderContents.user_folder_id == user_folder_id, FolderContents.user_id == user_id, FolderContents.content_id == content_id], update_data=update_data, db_session=db_session, auto_commit=auto_commit)

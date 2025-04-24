@@ -46,52 +46,38 @@ async def get_user_files_controller(user_id: str, page: int, db_session: Session
     
     return response
 
-async def upload_user_files_controller(user_id: str, user_files: List[UploadFile], db_session: Session):
+async def upload_user_files_controller(user_id: str, folder_id: str, file_modified_at: int, user_file: UploadFile, db_session: Session):
     response = APIResponse()
     try:
-        uploaded_files = GetUserFilesResponse(files=[])
-        user_files_rows = []
-        file_upload_coroutines = []
+        uploaded_files = None
         
-        for file in user_files:
-            file_id = uuid.uuid4().hex
-            file_type = get_file_type_from_mime_type(file.content_type)
-            file_thumbnail_url = get_file_thumbnail_url(file=file, file_type=file_type)
-            
-            user_files_rows.append(
-                UserFiles(
-                    id = file_id,
-                    user_id = user_id,
-                    file_name = file.filename,
-                    file_type = file_type,
-                    file_size = file.size,
-                    file_public_url = '',
-                )
-            )
-            
-            file_name_without_spaces = file.filename.replace(' ', '_')
-            
-            file_upload_coroutines.append(
-                upload_file_to_gcs(bucket_name=settings.gcs_bucket_name, blob_to_upload=file, blob_file_path=f'{user_id}/{file_id}_{file_name_without_spaces}')
-            )
-            
-        file_urls = await asyncio.gather(*file_upload_coroutines)
+        file_id = uuid.uuid4().hex
+        file_type = get_file_type_from_mime_type(mime_type=user_file.content_type)
+        file_name_without_spaces = user_file.filename.replace(' ', '_')
+        file_blob_name = f'{user_id}/{file_id}_{file_name_without_spaces}'
+        file_public_url = await upload_file_to_gcs(bucket_name=settings.gcs_bucket_name, blob_to_upload=user_file, blob_file_path=file_blob_name)
+        file_thumbnail_url = await get_file_thumbnail_url(file_type=file_type, file=user_file)
         
-        for index, url in enumerate(file_urls):
-            user_files_rows[index].file_public_url = url
-            uploaded_files.files.append(
-                UserFileMetadata(
-                    file_id=user_files_rows[index].id,
-                    file_name=user_files_rows[index].file_name,
-                    file_type=user_files_rows[index].file_type,
-                    file_public_url=user_files_rows[index].file_public_url,
-                    # file_last_modified=user_files_rows[index].file_last_modified,
-                )
-            )
+        user_file_row_data = {
+            "id": file_id,
+            "user_id": user_id,
+            "folder_id": folder_id,
+            "file_name": user_file.filename,
+            "file_type": file_type,
+            "file_size": user_file.size,
+            "file_public_url": file_public_url,
+            "file_thumbnail_url": file_thumbnail_url,
+            "file_last_modified": datetime.datetime.fromtimestamp(file_modified_at / 1000),
+            "file_upload_status": UserFilesUploadStatus.OK.value,
+            "file_blob_name": file_blob_name
+        }
         
+        user_files_crud.create_user_files_rows(files_row_data=[user_file_row_data], db_session=db_session, auto_commit=True)
+        user_files_crud.create_folder_content_rows_for_files(files_row_data=[user_file_row_data], db_session=db_session, auto_commit=True)
         
-        GenericCrud.create_multiple_rows(table_rows_data=user_files_rows, db_session=db_session, auto_commit=True)
-        response.data = uploaded_files
+        response.data = {
+            "file": UserFileDetails(**user_file_row_data, file_id=user_file_row_data.get('id'))
+        }
         
     except Exception as e:
         response.status = API_STATUS_STRINGS.ERROR.value
@@ -310,13 +296,14 @@ async def get_file_details_controller(file_id: str, folder_id: str, user_authent
     response = APIResponse()
     try:
         file_row = user_files_crud.get_user_files_row(file_id=file_id, folder_id=folder_id, user_id=user_authentication.user_id, db_session=db_session, columns=[
-            UserFiles.file_name, UserFiles.file_type, UserFiles.file_size,
+            UserFiles.id, UserFiles.file_name, UserFiles.file_type, UserFiles.file_size,
             UserFiles.file_public_url, UserFiles.file_thumbnail_url, UserFiles.file_last_modified
         ])
         
         if file_row:
+            file_row_dict = file_row._asdict()
             response.data = {
-                "file_details": UserFileDetails(**file_row._asdict())
+                "file_details": UserFileDetails(**file_row_dict, file_id=file_row_dict.get('id'))
             }
         
 
@@ -327,5 +314,56 @@ async def get_file_details_controller(file_id: str, folder_id: str, user_authent
         response.status_code = 500
         
         logger.exception(f"ERROR IN GETTING USER FILE DETAILS :: {e}")
+    
+    return response
+
+
+async def update_file_controller(file_id: str, file_modified_at: int, folder_id: str, user_file: UploadFile, user_authentication: UserAuthentication, db_session: Session):
+    response = APIResponse()
+    try:
+        user_id = user_authentication.user_id
+        
+        file_type = get_file_type_from_mime_type(mime_type=user_file.content_type)
+        file_name_without_spaces = user_file.filename.replace(' ', '_')
+        file_blob_name = f'{user_id}/{file_id}_{file_name_without_spaces}'
+        file_public_url = await upload_file_to_gcs(bucket_name=settings.gcs_bucket_name, blob_to_upload=user_file, blob_file_path=file_blob_name)
+        file_thumbnail_url = await get_file_thumbnail_url(file_type=file_type, file=user_file)
+        
+        user_file_row_update_data = {
+            "file_name": user_file.filename,
+            "file_type": file_type,
+            "file_size": user_file.size,
+            "file_public_url": file_public_url,
+            "file_thumbnail_url": file_thumbnail_url,
+            "file_last_modified": datetime.datetime.fromtimestamp(file_modified_at / 1000),
+            "file_upload_status": UserFilesUploadStatus.OK.value,
+            "file_blob_name": file_blob_name
+        }
+        
+        folder_content_row_update_data = {
+            "content_name": user_file.filename,
+            "content_file_type": file_type,
+            "content_size": user_file.size,
+            "content_thumbnail_url": file_thumbnail_url,
+            "content_last_modified": datetime.datetime.fromtimestamp(file_modified_at / 1000),
+            "content_upload_status": UserFilesUploadStatus.OK.value,
+        }
+        
+        user_files_crud.update_user_files_row(update_data=user_file_row_update_data, folder_id=folder_id,
+                                              file_id=file_id, user_id=user_id, db_session=db_session, auto_commit=False)
+        
+        user_files_crud.update_folder_content_row(update_data=folder_content_row_update_data, content_id=file_id, user_folder_id=folder_id, user_id=user_id, db_session=db_session, auto_commit=False)
+        db_session.commit()
+        
+        response.data = {
+            "file": UserFileDetails(**user_file_row_update_data, file_id=file_id)
+        }
+        
+    except Exception as e:
+        db_session.rollback()
+        response.status = API_STATUS_STRINGS.ERROR.value
+        response.status_code = 500
+        
+        logger.exception(f"ERROR IN UPDATING USER USER FILE :: {e}")
     
     return response

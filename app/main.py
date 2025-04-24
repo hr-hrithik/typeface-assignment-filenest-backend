@@ -30,5 +30,5 @@ def on_startup():
     client.setup_logging(log_level=logging.INFO)
     logger.info(f"Logger initialised successfully")
     
-app.include_router(router=user_router, prefix='/api/v1')
-app.include_router(router=user_files_router, prefix='/api/v1')
+app.include_router(router=user_router, prefix='/api/v1/users')
+app.include_router(router=user_files_router, prefix='/api/v1/files')
