@@ -25,6 +25,7 @@ async def upload_file_to_gcs(bucket_name: str, blob_to_upload: UploadFile, blob_
         bucket = gcs_client.bucket(bucket_name=bucket_name)
         blob = bucket.blob(blob_name=blob_file_path)
         
+        await blob_to_upload.seek(0)
         blob_string_data = await blob_to_upload.read()
         await asyncio.to_thread(lambda: blob.upload_from_string(data=blob_string_data, timeout=timeout))
         blob_gcs_public_url = blob.public_url

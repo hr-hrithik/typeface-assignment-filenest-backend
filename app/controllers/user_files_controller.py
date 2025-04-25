@@ -13,7 +13,7 @@ from sqlalchemy.orm.session import Session
 from app.constants.common_constants import API_STATUS_STRINGS
 from app.constants.user_files_constants import GET_USER_FILES_PAGE_SIZE
 from app.crud.generic_crud import GenericCrud
-from app.database.db_enums_classes import FolderContentsContentType, UserFilesUploadStatus
+from app.database.db_enums_classes import FolderContentsContentType, UserFilesFileType, UserFilesUploadStatus
 from app.database.models import UserFiles, UserProfile
 from app.gcp.gcp_helpers import create_resumable_upload_session, download_gcs_file_as_bytes, upload_file_to_gcs
 from app.helpers.user_files_helpers import create_resumable_upload_session_data_mapping, get_file_thumbnail_url, get_file_type_from_mime_type
@@ -56,7 +56,7 @@ async def upload_user_files_controller(user_id: str, folder_id: str, file_modifi
         file_name_without_spaces = user_file.filename.replace(' ', '_')
         file_blob_name = f'{user_id}/{file_id}_{file_name_without_spaces}'
         file_public_url = await upload_file_to_gcs(bucket_name=settings.gcs_bucket_name, blob_to_upload=user_file, blob_file_path=file_blob_name)
-        file_thumbnail_url = await get_file_thumbnail_url(file_type=file_type, file=user_file)
+        file_thumbnail_url = await get_file_thumbnail_url(file_type=file_type, user_id=user_id, file=user_file)
         
         user_file_row_data = {
             "id": file_id,
@@ -155,37 +155,42 @@ async def file_upload_success_controller(data: FileUploadSuccessRequest, user_au
     response = APIResponse()
     try:
         user_file_row = user_files_crud.get_user_files_row(file_id=data.file_id, folder_id=data.folder_id, user_id=user_authentication.user_id, db_session=db_session, columns=['*'])
-        file_row_update_data = {
-            "file_upload_status": UserFilesUploadStatus.OK.value
-        }
         
-        user_files_crud.update_user_files_row(update_data=file_row_update_data, folder_id=data.folder_id, file_id=data.file_id, user_id=user_authentication.user_id, db_session=db_session, auto_commit=False)
-        folder_content_row_data = {
-            "user_id": user_authentication.user_id,
-            "folder_id": data.folder_id,
-            "id": user_file_row.id,
-            "file_name": user_file_row.file_name,
-            "file_size": user_file_row.file_size,
-            "file_upload_status": UserFilesUploadStatus.OK.value,
-            "file_last_modified": user_file_row.file_last_modified,
-            "file_type": user_file_row.file_type,
-            "file_thumbnail_url": user_file_row.file_thumbnail_url,
-        }
-        
-        user_files_crud.create_folder_content_rows_for_files(files_row_data=[folder_content_row_data], db_session=db_session, auto_commit=False)
-        db_session.commit()
-        
-        response.data = {
-            "folder_content": UserFolderContentMetadata(
-                content_type=FolderContentsContentType.FILE.value,
-                content_id=folder_content_row_data.get('id'),
-                content_name=folder_content_row_data.get('file_name'),
-                content_size=folder_content_row_data.get('file_size'),
-                content_last_modified=folder_content_row_data.get('file_last_modified'),
-                content_file_type=folder_content_row_data.get('file_type'),
-                content_thumbnail_url=folder_content_row_data.get('file_thumbnail_url'),
-            )
-        }
+        if user_file_row:
+            file_row_update_data = {
+                "file_upload_status": UserFilesUploadStatus.OK.value
+            }
+            
+            user_files_crud.update_user_files_row(update_data=file_row_update_data, folder_id=data.folder_id, file_id=data.file_id, user_id=user_authentication.user_id, db_session=db_session, auto_commit=False)
+            folder_content_row_data = {
+                "user_id": user_authentication.user_id,
+                "folder_id": data.folder_id,
+                "id": user_file_row.id,
+                "file_name": user_file_row.file_name,
+                "file_size": user_file_row.file_size,
+                "file_upload_status": UserFilesUploadStatus.OK.value,
+                "file_last_modified": user_file_row.file_last_modified,
+                "file_type": user_file_row.file_type,
+                "file_thumbnail_url": user_file_row.file_thumbnail_url,
+            }
+            
+            user_files_crud.create_folder_content_rows_for_files(files_row_data=[folder_content_row_data], db_session=db_session, auto_commit=False)
+            db_session.commit()
+            
+            response.data = {
+                "folder_content": UserFolderContentMetadata(
+                    content_type=FolderContentsContentType.FILE.value,
+                    content_id=folder_content_row_data.get('id'),
+                    content_name=folder_content_row_data.get('file_name'),
+                    content_size=folder_content_row_data.get('file_size'),
+                    content_last_modified=folder_content_row_data.get('file_last_modified'),
+                    content_file_type=folder_content_row_data.get('file_type'),
+                    content_thumbnail_url=folder_content_row_data.get('file_thumbnail_url'),
+                )
+            }
+            
+            if user_file_row.file_type == UserFilesFileType.IMAGE.value:
+                asyncio.create_task(generate_file_thumbnail_controller(file_id=data.file_id, user_id=user_authentication.user_id, db_session=db_session))
         
     except Exception as e:
         db_session.rollback()
@@ -389,4 +394,46 @@ async def delete_file_controller(file_id: str, user_authentication: UserAuthenti
         
         logger.exception(f"ERROR IN DELETING FILE :: {e}")
     
+    return response
+
+async def generate_file_thumbnail_controller(file_id: str, user_id: str, db_session: Session):
+    response = APIResponse()
+    
+    try:
+        file_details = user_files_crud.get_file_details(file_id=file_id, user_id=user_id, db_session=db_session, columns=[
+            UserFiles.file_blob_name, UserFiles.file_type, UserFiles.file_name, UserFiles.folder_id, UserFiles.file_thumbnail_url
+        ])
+        
+        if file_details:
+            file_blob_name = file_details.file_blob_name
+            file_type = file_details.file_type
+            file_name = file_details.file_name
+            folder_id = file_details.folder_id
+            file_thumbnail_url = file_details.file_thumbnail_url
+            
+            if file_type == UserFilesFileType.IMAGE.value:
+                file_data = await download_gcs_file_as_bytes(bucket_name=settings.gcs_bucket_name, blob_name=file_blob_name)
+                new_thumbnail_url = await get_file_thumbnail_url(file_type=file_type, user_id=user_id, file=UploadFile(file=io.BytesIO(file_data), filename=file_name))
+                
+                if new_thumbnail_url != file_thumbnail_url:
+                    user_file_update_data = {
+                        "file_thumbnail_url": new_thumbnail_url
+                    }
+                    
+                    folder_contents_update_data = {
+                        "content_thumbnail_url": new_thumbnail_url
+                    }
+                    
+                    user_files_crud.update_user_files_row(update_data=user_file_update_data, folder_id=folder_id, file_id=file_id, user_id=user_id, db_session=db_session, auto_commit=False)
+                    user_files_crud.update_folder_content_row(update_data=folder_contents_update_data, content_id=file_id, user_folder_id=folder_id, user_id=user_id, db_session=db_session, auto_commit=False)
+                
+                    db_session.commit()
+                
+    except Exception as e:
+        db_session.rollback()
+        response.status = API_STATUS_STRINGS.ERROR.value
+        response.status_code = 500
+        
+        logger.exception(f"ERROR IN GENERATING FILE THUMBNAIL :: {e}")
+        
     return response
