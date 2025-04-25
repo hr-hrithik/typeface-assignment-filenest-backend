@@ -52,3 +52,5 @@ uvicorn==0.34.1
 wheel==0.45.1
 wrapt==1.17.2
 zipp==3.21.0
+pillow==11.2.1
+pillow-avif-plugin==1.5.2
